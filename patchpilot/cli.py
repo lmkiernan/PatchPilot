@@ -19,9 +19,11 @@ from patchpilot.patch_agent import (
 from patchpilot.patch_validator import validate_patch
 from patchpilot.repair_packet import REPAIRS_FILE, build_repair_packets
 from patchpilot.runner import RunnerError, run_tests
+from patchpilot.verifier import verify_patch
 
 OUTPUT_DIR = ".patchpilot"
 OUTPUT_FILE = "patchpilot_failures.json"
+VERIFICATION_FILE = "patchpilot_verification.json"
 
 
 @click.group()
@@ -253,8 +255,11 @@ def validate_patch_cmd(project_root: str, max_diff_lines: int) -> None:
 
     diff_files = sorted(out_dir.glob(f"{CANDIDATE_PATCH_PREFIX}*.diff"))
     if not diff_files:
-        click.echo("No candidate patches found in .patchpilot/. Run 'patchpilot propose-patch' first.")
-        return
+        click.echo(
+            "error: no candidate patches found in .patchpilot/ — run 'patchpilot propose-patch' first.",
+            err=True,
+        )
+        sys.exit(1)
 
     all_valid = True
     for diff_path in diff_files:
@@ -268,7 +273,11 @@ def validate_patch_cmd(project_root: str, max_diff_lines: int) -> None:
 
         packet = packets.get(rc_id)
         if packet is None:
-            click.echo(f"  warning: no repair packet found for {rc_id} — skipping")
+            click.echo(
+                f"  error: no repair packet found for {rc_id} — pipeline state is inconsistent",
+                err=True,
+            )
+            all_valid = False
             continue
 
         result = validate_patch(diff_path.read_text(), packet, root, max_diff_lines=max_diff_lines)
@@ -287,6 +296,127 @@ def validate_patch_cmd(project_root: str, max_diff_lines: int) -> None:
                 click.echo(f"    - {v}")
 
     if not all_valid:
+        sys.exit(1)
+
+
+@main.command("verify-patch")
+@click.option(
+    "--project-root",
+    default=".",
+    show_default=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Root directory containing .patchpilot/.",
+)
+@click.option(
+    "--max-diff-lines",
+    default=80,
+    show_default=True,
+    help="Maximum number of added+removed lines allowed.",
+)
+def verify_patch_cmd(project_root: str, max_diff_lines: int) -> None:
+    """Apply each candidate patch, run tests, and leave the fix in place only if all tests pass."""
+    root = Path(project_root).resolve()
+    out_dir = root / OUTPUT_DIR
+    repairs_path = out_dir / REPAIRS_FILE
+
+    if not repairs_path.exists():
+        click.echo(
+            f"error: {repairs_path} not found — run 'patchpilot diagnose' first.", err=True
+        )
+        sys.exit(1)
+
+    packets = {
+        p["root_cause_id"]: p
+        for p in json.loads(repairs_path.read_text()).get("repairs", [])
+    }
+
+    diff_files = sorted(out_dir.glob(f"{CANDIDATE_PATCH_PREFIX}*.diff"))
+    if not diff_files:
+        click.echo(
+            "error: no candidate patches found in .patchpilot/ — run 'patchpilot propose-patch' first.",
+            err=True,
+        )
+        sys.exit(1)
+
+    all_results = {}
+    any_failed = False
+
+    for diff_path in diff_files:
+        rc_id = diff_path.stem[len(CANDIDATE_PATCH_PREFIX):]
+        try:
+            display = diff_path.relative_to(Path.cwd())
+        except ValueError:
+            display = diff_path
+
+        click.echo(f"\nVerifying {display}")
+
+        packet = packets.get(rc_id)
+        if packet is None:
+            click.echo(
+                f"  error: no repair packet found for {rc_id} — pipeline state is inconsistent",
+                err=True,
+            )
+            any_failed = True
+            continue
+
+        result = verify_patch(diff_path.read_text(), packet, root, max_diff_lines=max_diff_lines)
+        all_results[rc_id] = result.to_dict()
+
+        # ── Per-stage output ───────────────────────────────────────────────────
+        if result.stage == "validation":
+            click.echo("  validation:     FAIL")
+            for v in result.violations:
+                click.echo(f"    - {v}")
+        elif result.stage == "apply":
+            click.echo("  validation:     OK")
+            click.echo("  apply:          FAIL")
+            click.echo(f"    {result.apply_error.strip()}")
+        else:
+            click.echo("  validation:     OK")
+            click.echo("  apply:          OK")
+
+            if result.targeted_exit_code is not None:
+                t_status = "OK" if result.targeted_exit_code == 0 else f"FAIL (exit {result.targeted_exit_code})"
+                click.echo(f"  targeted tests: {t_status}")
+                if result.targeted_exit_code != 0 and result.targeted_stdout.strip():
+                    for line in result.targeted_stdout.strip().splitlines()[-10:]:
+                        click.echo(f"    {line}")
+
+            if result.stage == "full" or result.ok:
+                f_status = "OK" if result.full_exit_code == 0 else f"FAIL (exit {result.full_exit_code})"
+                click.echo(f"  full tests:     {f_status}")
+                if result.full_exit_code != 0 and result.full_stdout.strip():
+                    for line in result.full_stdout.strip().splitlines()[-10:]:
+                        click.echo(f"    {line}")
+
+        # ── Outcome line ───────────────────────────────────────────────────────
+        if result.ok:
+            click.echo("  PASS — patch is live")
+            changed = _parse_changed_files(diff_path.read_text())
+            if changed:
+                click.echo("  Changed files:")
+                for f in changed:
+                    click.echo(f"    - {f}")
+        else:
+            any_failed = True
+            if result.revert_failed:
+                click.echo(
+                    f"  WARNING — revert failed, manual cleanup may be needed: {result.revert_error.strip()}"
+                )
+            elif result.stage not in ("validation", "apply"):
+                click.echo("  Patch reverted.")
+            click.echo(f"  FAIL — {result.stage} stage failed")
+
+    # ── Write verification report ──────────────────────────────────────────────
+    report = {"schema_version": "0.1", "results": all_results}
+    (out_dir / VERIFICATION_FILE).write_text(json.dumps(report, indent=2))
+    try:
+        report_display = (out_dir / VERIFICATION_FILE).relative_to(Path.cwd())
+    except ValueError:
+        report_display = out_dir / VERIFICATION_FILE
+    click.echo(f"\nWrote {report_display}")
+
+    if any_failed:
         sys.exit(1)
 
 
