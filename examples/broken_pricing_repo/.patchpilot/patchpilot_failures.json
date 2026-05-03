@@ -1,0 +1,25 @@
+{
+  "command": "pytest -q",
+  "exit_code": 1,
+  "passed": false,
+  "failures": [
+    {
+      "test": "tests/test_pricing.py::test_no_discount",
+      "error_type": "AttributeError",
+      "message": "'NoneType' object has no attribute 'percent'",
+      "file": "src/pricing/calc.py",
+      "line": 2,
+      "function": "compute_discount",
+      "raw_traceback": "tests/test_pricing.py:10: in test_no_discount\n    assert compute_discount(100, None) == 100\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/pricing/calc.py:2: in compute_discount\n    return price * discount.percent\n                   ^^^^^^^^^^^^^^^^\nE   AttributeError: 'NoneType' object has no attribute 'percent'"
+    },
+    {
+      "test": "tests/test_pricing.py::test_final_price_no_discount",
+      "error_type": "AttributeError",
+      "message": "'NoneType' object has no attribute 'percent'",
+      "file": "src/pricing/calc.py",
+      "line": 2,
+      "function": "compute_discount",
+      "raw_traceback": "tests/test_pricing.py:25: in test_final_price_no_discount\n    assert final_price(100, discount=None, tax_rate=0.0) == 100.0\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/pricing/calc.py:10: in final_price\n    discounted = compute_discount(price, discount)\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsrc/pricing/calc.py:2: in compute_discount\n    return price * discount.percent\n                   ^^^^^^^^^^^^^^^^\nE   AttributeError: 'NoneType' object has no attribute 'percent'"
+    }
+  ]
+}
