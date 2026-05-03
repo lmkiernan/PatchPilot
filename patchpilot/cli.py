@@ -4,7 +4,7 @@ from pathlib import Path
 
 import click
 
-from patchpilot.failure_parser import parse_pytest_output
+from patchpilot.failure_parser import group_root_causes, parse_pytest_output
 from patchpilot.models import DiagnoseResult
 from patchpilot.runner import RunnerError, run_tests
 
@@ -37,19 +37,21 @@ def diagnose(test_command: str, project_root: str) -> None:
     click.echo(f"Running: {test_command}")
 
     try:
-        exit_code, stdout, stderr = run_tests(test_command)
+        exit_code, stdout, stderr = run_tests(test_command, cwd=str(root))
     except RunnerError as e:
         click.echo(f"error: {e}", err=True)
         sys.exit(1)
 
     passed = exit_code == 0
     failures = [] if passed else parse_pytest_output(stdout, stderr)
+    root_causes = group_root_causes(failures)
 
     result = DiagnoseResult(
         command=test_command,
         exit_code=exit_code,
         passed=passed,
         failures=failures,
+        root_causes=root_causes,
     )
 
     out_dir = root / OUTPUT_DIR
@@ -61,11 +63,14 @@ def diagnose(test_command: str, project_root: str) -> None:
     if passed:
         click.echo("All tests passed. No failures to report.")
     else:
-        click.echo(f"Found {len(failures)} failure(s).")
-        for f in failures:
-            click.echo(f"  {f.test}")
-            click.echo(f"    {f.error_type}: {f.message}")
-            if f.file:
-                click.echo(f"    {f.file}:{f.line} in {f.function}()")
+        click.echo(f"Found {len(failures)} failure(s) across {len(root_causes)} root cause(s).")
+        for rc in root_causes:
+            click.echo(f"  [{rc.id}] {rc.source_file}:{rc.source_line} in {rc.source_function}()")
+            click.echo(f"    {rc.error_type}: {rc.message}")
+            click.echo(f"    affects: {', '.join(rc.affected_failure_ids)}")
 
-    click.echo(f"\nWrote {out_path.relative_to(Path.cwd())}")
+    try:
+        display_path = out_path.relative_to(Path.cwd())
+    except ValueError:
+        display_path = out_path
+    click.echo(f"\nWrote {display_path}")

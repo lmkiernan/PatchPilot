@@ -18,12 +18,17 @@ _SETUP_EXIT_REASONS = {
 }
 
 
-def run_tests(command: str) -> tuple[int, str, str]:
+def run_tests(
+    command: str,
+    cwd: str | None = None,
+    timeout_seconds: int = 300,
+) -> tuple[int, str, str]:
     """
     Run the test command and return (exit_code, stdout, stderr).
 
     Appends --tb=short if no --tb flag is present, for reliable traceback parsing.
-    Raises RunnerError if the command itself cannot be run or pytest errors out.
+    Raises RunnerError if the command itself cannot be run, pytest errors out, or the
+    process exceeds timeout_seconds.
     """
     parts = shlex.split(command)
     executable = parts[0]
@@ -37,7 +42,19 @@ def run_tests(command: str) -> tuple[int, str, str]:
     if "--tb" not in command:
         parts.extend(["--tb=short"])
 
-    result = subprocess.run(parts, capture_output=True, text=True)
+    try:
+        result = subprocess.run(
+            parts,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        raise RunnerError(
+            f"Test command timed out after {timeout_seconds}s.\n"
+            "Pass --timeout to increase the limit."
+        )
 
     if result.returncode not in _VALID_EXIT_CODES:
         reason = _SETUP_EXIT_REASONS.get(result.returncode, f"exit code {result.returncode}")
