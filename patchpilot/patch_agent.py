@@ -6,6 +6,7 @@ and writes candidate_patch_{root_cause_id}.diff to .patchpilot/.
 The patch is NOT applied here — that is the verifier's job.
 """
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -82,6 +83,41 @@ def write_candidate_patch(diff: str, root_cause_id: str, out_dir: Path) -> Path:
     out_path = out_dir / f"{CANDIDATE_PATCH_PREFIX}{root_cause_id}.diff"
     out_path.write_text(diff)
     return out_path
+
+
+def render_prompt(packet: dict) -> tuple[str, str]:
+    """Return (system, user) prompt strings without calling the LLM."""
+    return _build_system_prompt(packet), _build_user_message(packet)
+
+
+# ── Diff cache ─────────────────────────────────────────────────────────────────
+
+
+CACHE_DIR_NAME = "cache"
+
+
+def _packet_hash(packet: dict) -> str:
+    """16-char SHA-256 hash of the LLM-visible fields. Stable across runs."""
+    llm_fields = {
+        k: packet[k]
+        for k in ("error", "target", "source_context", "imports", "tests", "constraints")
+        if k in packet
+    }
+    content = json.dumps(llm_fields, sort_keys=True)
+    return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+
+def load_cached_diff(packet: dict, out_dir: Path) -> str | None:
+    """Return a previously cached diff for this packet, or None if not cached."""
+    cache_file = out_dir / CACHE_DIR_NAME / f"{_packet_hash(packet)}.diff"
+    return cache_file.read_text() if cache_file.exists() else None
+
+
+def save_cached_diff(diff: str, packet: dict, out_dir: Path) -> None:
+    """Cache a generated diff keyed by the packet's content hash."""
+    cache_dir = out_dir / CACHE_DIR_NAME
+    cache_dir.mkdir(exist_ok=True)
+    (cache_dir / f"{_packet_hash(packet)}.diff").write_text(diff)
 
 
 # ── Prompt construction ────────────────────────────────────────────────────────

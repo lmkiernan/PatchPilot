@@ -7,7 +7,14 @@ import click
 from patchpilot.ast_context import build_context
 from patchpilot.failure_parser import group_root_causes, parse_pytest_output
 from patchpilot.models import DiagnoseResult
-from patchpilot.patch_agent import generate_patch, get_client, write_candidate_patch
+from patchpilot.patch_agent import (
+    generate_patch,
+    get_client,
+    load_cached_diff,
+    render_prompt,
+    save_cached_diff,
+    write_candidate_patch,
+)
 from patchpilot.repair_packet import REPAIRS_FILE, build_repair_packets
 from patchpilot.runner import RunnerError, run_tests
 
@@ -107,12 +114,7 @@ def diagnose(test_command: str, project_root: str) -> None:
 
 
 @main.command("propose-patch")
-@click.option(
-    "--provider",
-    default="anthropic",
-    show_default=True,
-    help="LLM provider to use.",
-)
+@click.option("--provider", default="anthropic", show_default=True, help="LLM provider to use.")
 @click.option(
     "--model",
     default=None,
@@ -125,7 +127,23 @@ def diagnose(test_command: str, project_root: str) -> None:
     type=click.Path(exists=True, file_okay=False),
     help="Root directory containing .patchpilot/.",
 )
-def propose_patch(provider: str, model: str | None, project_root: str) -> None:
+@click.option(
+    "--dry-run-prompt",
+    is_flag=True,
+    help="Print the rendered system/user prompt for the first packet without calling the API.",
+)
+@click.option(
+    "--no-cache",
+    is_flag=True,
+    help="Skip the diff cache and always call the LLM.",
+)
+def propose_patch(
+    provider: str,
+    model: str | None,
+    project_root: str,
+    dry_run_prompt: bool,
+    no_cache: bool,
+) -> None:
     """Generate a candidate diff per root cause and write it to .patchpilot/ — does not apply it."""
     root = Path(project_root).resolve()
     out_dir = root / OUTPUT_DIR
@@ -144,6 +162,14 @@ def propose_patch(provider: str, model: str | None, project_root: str) -> None:
         click.echo("No repair packets found. Nothing to patch.")
         return
 
+    if dry_run_prompt:
+        system, user = render_prompt(packets[0])
+        click.echo("── SYSTEM PROMPT ──────────────────────────────────────")
+        click.echo(system)
+        click.echo("\n── USER MESSAGE ───────────────────────────────────────")
+        click.echo(user)
+        return
+
     try:
         client = get_client(provider=provider, model=model)
     except RuntimeError as e:
@@ -159,6 +185,18 @@ def propose_patch(provider: str, model: str | None, project_root: str) -> None:
             f"in {target.get('function', '?')}())"
         )
 
+        if not no_cache:
+            cached = load_cached_diff(packet, out_dir)
+            if cached:
+                click.echo("  cache hit — reusing cached diff")
+                out_path = write_candidate_patch(cached, rc_id, out_dir)
+                try:
+                    display = out_path.relative_to(Path.cwd())
+                except ValueError:
+                    display = out_path
+                click.echo(f"  wrote {display}")
+                continue
+
         try:
             diff = generate_patch(packet, client)
         except Exception as e:
@@ -168,6 +206,9 @@ def propose_patch(provider: str, model: str | None, project_root: str) -> None:
         if not diff:
             click.echo(f"  warning: empty diff returned for {rc_id}", err=True)
             continue
+
+        if not no_cache:
+            save_cached_diff(diff, packet, out_dir)
 
         out_path = write_candidate_patch(diff, rc_id, out_dir)
         try:
