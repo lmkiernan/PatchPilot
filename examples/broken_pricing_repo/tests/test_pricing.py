@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from pricing.calc import apply_tax, compute_discount, final_price
+from src.pricing.calc import apply_tax, compute_discount, final_price
 
 
 def test_no_discount():

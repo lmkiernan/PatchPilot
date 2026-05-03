@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "patchpilot"
+version = "0.1.0"
+description = "AST-guided CI repair agent for Python/pytest projects"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40.0",
+    "click>=8.1.0",
+]
+
+[project.optional-dependencies]
+github = ["PyGithub>=2.0.0"]
+dev = ["pytest>=8.0.0", "ruff>=0.4.0"]
+
+[project.scripts]
+patchpilot = "patchpilot.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["patchpilot"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
