@@ -48,6 +48,8 @@ class AnthropicClient:
             system=system,
             messages=[{"role": "user", "content": user}],
         )
+        if not message.content:
+            raise RuntimeError("LLM returned an empty response")
         return message.content[0].text
 
 
@@ -175,7 +177,8 @@ def _build_user_message(packet: dict) -> str:
 def _extract_diff(raw: str) -> str:
     """
     Return a clean diff string from raw LLM output.
-    Handles markdown fences (```diff / ```) and any leading prose before '--- a/'.
+    Strips markdown fences and leading prose; prefers "diff --git" header,
+    falls back to the first "---" / "+++" pair.
     """
     text = raw.strip()
 

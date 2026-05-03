@@ -172,7 +172,7 @@ def propose_patch(
 
     try:
         client = get_client(provider=provider, model=model)
-    except RuntimeError as e:
+    except (RuntimeError, ValueError) as e:
         click.echo(f"error: {e}", err=True)
         sys.exit(1)
 
