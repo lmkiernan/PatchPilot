@@ -63,12 +63,63 @@ class RootCause:
 
 
 @dataclass
+class TestFunction:
+    test_id: str
+    file: str
+    function_name: str
+    source: str
+
+    def to_dict(self) -> dict:
+        return {
+            "test_id": self.test_id,
+            "file": self.file,
+            "function_name": self.function_name,
+            "source": self.source,
+        }
+
+
+@dataclass
+class ASTContext:
+    root_cause_id: str
+    source_file: str
+    target_line: int
+    enclosing_function: str
+    enclosing_class: str | None
+    function_span: list[int]       # [start_line, end_line]
+    function_source: str
+    target_source_line: str
+    node_type: str
+    target_expression: str         # e.g. "discount.percent"
+    imports: list[str]
+    related_tests: list[str]
+    test_functions: list[TestFunction] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "root_cause_id": self.root_cause_id,
+            "source_file": self.source_file,
+            "target_line": self.target_line,
+            "enclosing_function": self.enclosing_function,
+            "enclosing_class": self.enclosing_class,
+            "function_span": self.function_span,
+            "function_source": self.function_source,
+            "target_source_line": self.target_source_line,
+            "node_type": self.node_type,
+            "target_expression": self.target_expression,
+            "imports": self.imports,
+            "related_tests": self.related_tests,
+            "test_functions": [t.to_dict() for t in self.test_functions],
+        }
+
+
+@dataclass
 class DiagnoseResult:
     command: str
     exit_code: int
     passed: bool
     failures: list[ParsedFailure] = field(default_factory=list)
     root_causes: list[RootCause] = field(default_factory=list)
+    ast_contexts: list[ASTContext] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -81,4 +132,5 @@ class DiagnoseResult:
             "root_cause_count": len(self.root_causes),
             "failures": [f.to_dict() for f in self.failures],
             "root_causes": [r.to_dict() for r in self.root_causes],
+            "ast_contexts": [c.to_dict() for c in self.ast_contexts],
         }

@@ -48,5 +48,41 @@
       ],
       "parser_confidence": "high"
     }
+  ],
+  "ast_contexts": [
+    {
+      "root_cause_id": "root_001",
+      "source_file": "src/pricing/calc.py",
+      "target_line": 2,
+      "enclosing_function": "compute_discount",
+      "enclosing_class": null,
+      "function_span": [
+        1,
+        2
+      ],
+      "function_source": "def compute_discount(price, discount):\n    return price * discount.percent",
+      "target_source_line": "    return price * discount.percent",
+      "node_type": "attribute_access",
+      "target_expression": "discount.percent",
+      "imports": [],
+      "related_tests": [
+        "tests/test_pricing.py::test_no_discount",
+        "tests/test_pricing.py::test_final_price_no_discount"
+      ],
+      "test_functions": [
+        {
+          "test_id": "tests/test_pricing.py::test_no_discount",
+          "file": "tests/test_pricing.py",
+          "function_name": "test_no_discount",
+          "source": "def test_no_discount():\n    assert compute_discount(100, None) == 100"
+        },
+        {
+          "test_id": "tests/test_pricing.py::test_final_price_no_discount",
+          "file": "tests/test_pricing.py",
+          "function_name": "test_final_price_no_discount",
+          "source": "def test_final_price_no_discount():\n    assert final_price(100, discount=None, tax_rate=0.0) == 100.0"
+        }
+      ]
+    }
   ]
 }
