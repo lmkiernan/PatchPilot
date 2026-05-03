@@ -12,6 +12,12 @@ import os
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Load .env file if it exists
+except ImportError:
+    pass  # python-dotenv not installed, continue without .env loading
+
 CANDIDATE_PATCH_PREFIX = "candidate_patch_"
 
 
