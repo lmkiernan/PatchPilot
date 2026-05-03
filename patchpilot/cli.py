@@ -7,6 +7,7 @@ import click
 from patchpilot.ast_context import build_context
 from patchpilot.failure_parser import group_root_causes, parse_pytest_output
 from patchpilot.models import DiagnoseResult
+from patchpilot.repair_packet import REPAIRS_FILE, build_repair_packets
 from patchpilot.runner import RunnerError, run_tests
 
 OUTPUT_DIR = ".patchpilot"
@@ -77,6 +78,11 @@ def diagnose(test_command: str, project_root: str) -> None:
     out_path = out_dir / OUTPUT_FILE
 
     out_path.write_text(json.dumps(result.to_dict(), indent=2))
+
+    if not passed and result.ast_contexts:
+        repairs = build_repair_packets(result)
+        repairs_data = {"schema_version": "0.1", "repairs": [r.to_dict() for r in repairs]}
+        (out_dir / REPAIRS_FILE).write_text(json.dumps(repairs_data, indent=2))
 
     if passed:
         click.echo("All tests passed. No failures to report.")

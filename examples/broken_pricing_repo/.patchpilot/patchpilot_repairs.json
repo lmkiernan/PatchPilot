@@ -1,0 +1,44 @@
+{
+  "schema_version": "0.1",
+  "repairs": [
+    {
+      "root_cause_id": "root_001",
+      "confidence": {
+        "parser": "high",
+        "ast_context": "high",
+        "test_context": "high"
+      },
+      "error": {
+        "type": "AttributeError",
+        "message": "'NoneType' object has no attribute 'percent'"
+      },
+      "target": {
+        "file": "src/pricing/calc.py",
+        "line": 2,
+        "function": "compute_discount",
+        "node_type": "attribute_access",
+        "expression": "discount.percent"
+      },
+      "source_context": "def compute_discount(price, discount):\n    return price * discount.percent",
+      "imports": [],
+      "tests": [
+        "def test_no_discount():\n    assert compute_discount(100, None) == 100",
+        "def test_final_price_no_discount():\n    assert final_price(100, discount=None, tax_rate=0.0) == 100.0"
+      ],
+      "constraints": {
+        "return_unified_diff_only": true,
+        "touch_source_file_only": true,
+        "allowed_files": [
+          "src/pricing/calc.py"
+        ],
+        "allow_test_edits": false,
+        "prefer_minimal_patch": true,
+        "max_files_changed": 1
+      },
+      "verification": {
+        "targeted_test_command": "pytest tests/test_pricing.py::test_no_discount tests/test_pricing.py::test_final_price_no_discount -q",
+        "full_test_command": "pytest -q"
+      }
+    }
+  ]
+}
