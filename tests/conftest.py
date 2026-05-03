@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 
 
@@ -28,6 +30,32 @@ class MockPatchClient:
 @pytest.fixture
 def mock_client() -> MockPatchClient:
     return MockPatchClient()
+
+
+# ── Git repo fixture (shared by patch_apply and verifier tests) ────────────────
+
+_CALC_ORIGINAL = (
+    "def compute_discount(price, discount):\n"
+    "    return price * discount.percent\n"
+)
+
+
+def _git(cwd, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+@pytest.fixture
+def git_repo(tmp_path):
+    """Minimal git repo with src/pricing/calc.py committed."""
+    src = tmp_path / "src" / "pricing"
+    src.mkdir(parents=True)
+    (src / "calc.py").write_text(_CALC_ORIGINAL)
+    _git(tmp_path, "init")
+    _git(tmp_path, "config", "user.email", "test@patchpilot.local")
+    _git(tmp_path, "config", "user.name", "PatchPilot Test")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-m", "initial")
+    return tmp_path
 
 
 @pytest.fixture

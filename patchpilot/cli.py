@@ -8,6 +8,7 @@ from patchpilot.ast_context import build_context
 from patchpilot.failure_parser import group_root_causes, parse_pytest_output
 from patchpilot.models import DiagnoseResult
 from patchpilot.patch_agent import (
+    CANDIDATE_PATCH_PREFIX,
     generate_patch,
     get_client,
     load_cached_diff,
@@ -15,6 +16,7 @@ from patchpilot.patch_agent import (
     save_cached_diff,
     write_candidate_patch,
 )
+from patchpilot.patch_validator import validate_patch
 from patchpilot.repair_packet import REPAIRS_FILE, build_repair_packets
 from patchpilot.runner import RunnerError, run_tests
 
@@ -216,3 +218,84 @@ def propose_patch(
         except ValueError:
             display = out_path
         click.echo(f"  wrote {display}")
+
+
+@main.command("validate-patch")
+@click.option(
+    "--project-root",
+    default=".",
+    show_default=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Root directory containing .patchpilot/.",
+)
+@click.option(
+    "--max-diff-lines",
+    default=80,
+    show_default=True,
+    help="Maximum number of added+removed lines allowed.",
+)
+def validate_patch_cmd(project_root: str, max_diff_lines: int) -> None:
+    """Validate all candidate diffs in .patchpilot/ against their repair constraints."""
+    root = Path(project_root).resolve()
+    out_dir = root / OUTPUT_DIR
+    repairs_path = out_dir / REPAIRS_FILE
+
+    if not repairs_path.exists():
+        click.echo(
+            f"error: {repairs_path} not found — run 'patchpilot diagnose' first.", err=True
+        )
+        sys.exit(1)
+
+    packets = {
+        p["root_cause_id"]: p
+        for p in json.loads(repairs_path.read_text()).get("repairs", [])
+    }
+
+    diff_files = sorted(out_dir.glob(f"{CANDIDATE_PATCH_PREFIX}*.diff"))
+    if not diff_files:
+        click.echo("No candidate patches found in .patchpilot/. Run 'patchpilot propose-patch' first.")
+        return
+
+    all_valid = True
+    for diff_path in diff_files:
+        rc_id = diff_path.stem[len(CANDIDATE_PATCH_PREFIX):]
+        try:
+            display = diff_path.relative_to(Path.cwd())
+        except ValueError:
+            display = diff_path
+
+        click.echo(f"Validating {display}")
+
+        packet = packets.get(rc_id)
+        if packet is None:
+            click.echo(f"  warning: no repair packet found for {rc_id} — skipping")
+            continue
+
+        result = validate_patch(diff_path.read_text(), packet, root, max_diff_lines=max_diff_lines)
+
+        if result.ok:
+            click.echo("  OK: patch is valid")
+            changed = _parse_changed_files(diff_path.read_text())
+            if changed:
+                click.echo("  Changed files:")
+                for f in changed:
+                    click.echo(f"    - {f}")
+        else:
+            all_valid = False
+            click.echo("  INVALID patch")
+            for v in result.violations:
+                click.echo(f"    - {v}")
+
+    if not all_valid:
+        sys.exit(1)
+
+
+def _parse_changed_files(diff: str) -> list[str]:
+    """Extract the list of files touched by a diff (reads +++ b/... headers)."""
+    files = []
+    for line in diff.splitlines():
+        if line.startswith("+++ b/"):
+            path = line[6:].strip()
+            if path not in files:
+                files.append(path)
+    return files
