@@ -7,6 +7,7 @@ import click
 from patchpilot.ast_context import build_context
 from patchpilot.failure_parser import group_root_causes, parse_pytest_output
 from patchpilot.models import DiagnoseResult
+from patchpilot.patch_agent import generate_patch, get_client, write_candidate_patch
 from patchpilot.repair_packet import REPAIRS_FILE, build_repair_packets
 from patchpilot.runner import RunnerError, run_tests
 
@@ -103,3 +104,74 @@ def diagnose(test_command: str, project_root: str) -> None:
     except ValueError:
         display_path = out_path
     click.echo(f"\nWrote {display_path}")
+
+
+@main.command("propose-patch")
+@click.option(
+    "--provider",
+    default="anthropic",
+    show_default=True,
+    help="LLM provider to use.",
+)
+@click.option(
+    "--model",
+    default=None,
+    help="Model override (PATCHPILOT_MODEL env var or provider default if omitted).",
+)
+@click.option(
+    "--project-root",
+    default=".",
+    show_default=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Root directory containing .patchpilot/.",
+)
+def propose_patch(provider: str, model: str | None, project_root: str) -> None:
+    """Generate a candidate diff per root cause and write it to .patchpilot/ — does not apply it."""
+    root = Path(project_root).resolve()
+    out_dir = root / OUTPUT_DIR
+    repairs_path = out_dir / REPAIRS_FILE
+
+    if not repairs_path.exists():
+        click.echo(
+            f"error: {repairs_path} not found — run 'patchpilot diagnose' first.", err=True
+        )
+        sys.exit(1)
+
+    repairs_data = json.loads(repairs_path.read_text())
+    packets = repairs_data.get("repairs", [])
+
+    if not packets:
+        click.echo("No repair packets found. Nothing to patch.")
+        return
+
+    try:
+        client = get_client(provider=provider, model=model)
+    except RuntimeError as e:
+        click.echo(f"error: {e}", err=True)
+        sys.exit(1)
+
+    for packet in packets:
+        rc_id = packet.get("root_cause_id", "unknown")
+        target = packet.get("target", {})
+        click.echo(
+            f"Generating patch for {rc_id} "
+            f"({target.get('file', '?')}:{target.get('line', '?')} "
+            f"in {target.get('function', '?')}())"
+        )
+
+        try:
+            diff = generate_patch(packet, client)
+        except Exception as e:
+            click.echo(f"  error: LLM call failed for {rc_id}: {e}", err=True)
+            continue
+
+        if not diff:
+            click.echo(f"  warning: empty diff returned for {rc_id}", err=True)
+            continue
+
+        out_path = write_candidate_patch(diff, rc_id, out_dir)
+        try:
+            display = out_path.relative_to(Path.cwd())
+        except ValueError:
+            display = out_path
+        click.echo(f"  wrote {display}")
